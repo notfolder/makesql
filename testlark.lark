@@ -1,0 +1,38 @@
+?expr: term
+    | add
+    | sub
+add : expr "+" term
+sub : expr "-" term
+
+?term  : unary
+    | mul
+    | div
+mul : term "*" unary
+div : term "/" unary
+?unary : factor
+    | unary_minus
+    | unary_plus
+unary_minus: "-" factor
+unary_plus: "+" factor
+?factor : number | symbol | "(" expr ")"
+    | max
+    | min
+    | mean
+    | median
+
+max: "MAX" "(" expr *("," expr) ")"
+min: "MIN" "(" expr *("," expr) ")"
+mean: "MEAN" "(" expr *("," expr) ")"
+median: "MEDIAN" "(" expr *("," expr) ")"
+
+
+// number : /[0-9]+/
+// symbol : /[a-zA-Z_][0-9a-zA-Z_]*/
+
+number : NUMBER
+symbol : CNAME
+
+%import common.CNAME
+%import common.NUMBER
+%import common.WS
+%ignore WS
