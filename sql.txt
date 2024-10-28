@@ -1,1 +1,1 @@
--1.5+TEST_1
+MAX(-1.5+TEST_1, TEST_2)
