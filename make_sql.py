@@ -6,6 +6,7 @@ from lark import Lark
 import pandas as pd
 import sqlite3
 import math
+from sqlalchemy.dialects import sqlite
 
 def create_percentile_functions(db_path):
     """SQLiteにパーセンタイル計算用の関数を追加"""
@@ -155,7 +156,6 @@ class SQLTransformer:
 
     def transform_max(self, tree):
         args = [self.transform(child) for child in tree.children]
-        # CASE式を使用して条件分岐を実装
         conditions = [ValueTable.attr_name == arg for arg in args]
         return func.max(case((or_(*conditions), ValueTable.attr_value)))
 
@@ -168,6 +168,39 @@ class SQLTransformer:
         args = [self.transform(child) for child in tree.children]
         conditions = [ValueTable.attr_name == arg for arg in args]
         return func.avg(case((or_(*conditions), ValueTable.attr_value)))
+
+    def transform_median(self, tree):
+        args = [self.transform(child) for child in tree.children]
+        conditions = [ValueTable.attr_name == arg for arg in args]
+        return func.percentile_50(case((or_(*conditions), ValueTable.attr_value)))
+
+    def transform_add(self, tree):
+        left = self.transform(tree.children[0])
+        right = self.transform(tree.children[1])
+        return left + right
+
+    def transform_sub(self, tree):
+        left = self.transform(tree.children[0])
+        right = self.transform(tree.children[1])
+        return left - right
+
+    def transform_mul(self, tree):
+        left = self.transform(tree.children[0])
+        right = self.transform(tree.children[1])
+        return left * right
+
+    def transform_div(self, tree):
+        left = self.transform(tree.children[0])
+        right = self.transform(tree.children[1])
+        return left / right
+
+    def transform_unary_minus(self, tree):
+        operand = self.transform(tree.children[0])
+        return -operand
+
+    def transform_unary_plus(self, tree):
+        operand = self.transform(tree.children[0])
+        return operand
 
     def transform_symbol(self, tree):
         # シンボルはそのまま文字列として返す
@@ -182,6 +215,11 @@ class SQLTransformer:
             return self.transform(tree.children[0])
         return str(tree.children[0])
 
+    def __default__(self, data, children, meta):
+        print(f"Unhandled rule: {data}, children: {children}")
+        # 通常は raise して開発中に気づくようにする
+        raise NotImplementedError(f"Rule not handled: {data}")
+
 def main():
     """メイン処理"""
     grammar = load_grammar()
@@ -190,7 +228,9 @@ def main():
     
     # SQLAlchemyによる処理
     query = create_summary_sql(expr, 'dummy_db.sqlite', parser)
-    
+
+    print(str(query.compile(dialect=sqlite.dialect())))
+
     # SQLAlchemyのセッションを使用してクエリを実行
     engine = create_engine('sqlite:///summary_db.sqlite')
     Base.metadata.create_all(engine)
@@ -215,3 +255,8 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+#from impala.sqlalchemy import dialect as impala_dialect
+
+# query = session.query(User).filter(User.name == 'Alice')
+# print(str(query.statement.compile(dialect=impala_dialect())))
