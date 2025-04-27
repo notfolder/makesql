@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, select, func, text, case, or_
+from sqlalchemy import create_engine, select, func, text, case, or_, and_
 from sqlalchemy.sql import expression
 from sqlalchemy.orm import Session
 from models import Base, ValueTable, SummaryTable
@@ -65,24 +65,17 @@ def create_summary_sql(expr_text, source_db_path, parser):
     tree = parser.parse(expr_text)
     transformer = SQLTransformer()
     expr_sql = transformer.transform(tree)
-    print("\n---- Generated SQL with values ----")
-    print(str(expr_sql.compile(
-        dialect=sqlite.dialect(),
-        compile_kwargs={"literal_binds": True}  # プレースホルダの代わりに実際の値を表示
-    )))
-    
-    engine = create_engine(f'sqlite:///{source_db_path}')
-    create_percentile_functions(source_db_path)
     
     # サブクエリとして式の結果を取得
+    value_table = ValueTable.__table__.alias()
     subquery = (
         select(
-            ValueTable.serial,
-            ValueTable.serial_sub,
+            value_table.c.serial,
+            value_table.c.serial_sub,
             expr_sql.label('calculated_value')
         )
-        .select_from(ValueTable)
-        .group_by(ValueTable.serial, ValueTable.serial_sub)
+        .select_from(value_table)
+        .group_by(value_table.c.serial, value_table.c.serial_sub)
         .alias('expr_result')
     )
     
@@ -101,11 +94,13 @@ def create_summary_sql(expr_text, source_db_path, parser):
         .group_by(subquery.c.serial, subquery.c.serial_sub)
     )
     
-    print("\n---- Complete Query with values ----")
-    print(str(query.compile(
+    # デバッグ出力
+    print("\n---- Generated SQL with values ----")
+    compiled = query.compile(
         dialect=sqlite.dialect(),
-        compile_kwargs={"literal_binds": True}  # プレースホルダの代わりに実際の値を表示
-    )))
+        compile_kwargs={"literal_binds": True}
+    )
+    print(str(compiled))
     
     return query
 
@@ -183,55 +178,70 @@ class SQLTransformer(Transformer):
         
     def max(self, tree):
         args = tree[0]  # arg_listから渡された引数のリスト
-        # 外部のテーブルを参照する相関サブクエリを作成
-        outer = ValueTable.__table__.alias()
-        return select(ValueTable.attr_value)\
+        main_table = ValueTable.__table__.alias()
+        target_table = ValueTable.__table__.alias()
+        
+        return select(target_table.c.attr_value)\
             .where(
-                ValueTable.serial == outer.c.serial,  # 外部テーブルのserialと比較
-                ValueTable.serial_sub == outer.c.serial_sub,  # 外部テーブルのserial_subと比較
-                ValueTable.attr_name.in_(args)
+                and_(
+                    target_table.c.serial == main_table.c.serial,
+                    target_table.c.serial_sub == main_table.c.serial_sub,
+                    target_table.c.attr_name.in_(args)
+                )
             )\
-            .order_by(ValueTable.attr_value.desc())\
+            .order_by(target_table.c.attr_value.desc())\
             .limit(1)\
-            .correlate(outer)\
+            .correlate(main_table)\
             .scalar_subquery()
 
     def min(self, tree):
-        args = tree[0]
-        outer = ValueTable.__table__.alias()
-        return select(ValueTable.attr_value)\
+        args = tree[0]  # arg_listから渡された引数のリスト
+        main_table = ValueTable.__table__.alias()
+        target_table = ValueTable.__table__.alias()
+        
+        return select(target_table.c.attr_value)\
             .where(
-                ValueTable.serial == outer.c.serial,
-                ValueTable.serial_sub == outer.c.serial_sub,
-                ValueTable.attr_name.in_(args)
+                and_(
+                    target_table.c.serial == main_table.c.serial,
+                    target_table.c.serial_sub == main_table.c.serial_sub,
+                    target_table.c.attr_name.in_(args)
+                )
             )\
-            .order_by(ValueTable.attr_value.asc())\
+            .order_by(target_table.c.attr_value.asc())\
             .limit(1)\
-            .correlate(outer)\
+            .correlate(main_table)\
             .scalar_subquery()
     
     def mean(self, tree):
-        args = tree[0]
-        outer = ValueTable.__table__.alias()
-        return select(func.avg(ValueTable.attr_value))\
+        args = tree[0]  # arg_listから渡された引数のリスト
+        main_table = ValueTable.__table__.alias()
+        target_table = ValueTable.__table__.alias()
+        
+        return select(func.avg(target_table.c.attr_value))\
             .where(
-                ValueTable.serial == outer.c.serial,
-                ValueTable.serial_sub == outer.c.serial_sub,
-                ValueTable.attr_name.in_(args)
+                and_(
+                    target_table.c.serial == main_table.c.serial,
+                    target_table.c.serial_sub == main_table.c.serial_sub,
+                    target_table.c.attr_name.in_(args)
+                )
             )\
-            .correlate(outer)\
+            .correlate(main_table)\
             .scalar_subquery()
 
     def median(self, tree):
-        args = tree[0]
-        outer = ValueTable.__table__.alias()
-        return select(func.percentile_50(ValueTable.attr_value))\
+        args = tree[0]  # arg_listから渡された引数のリスト
+        main_table = ValueTable.__table__.alias()
+        target_table = ValueTable.__table__.alias()
+        
+        return select(func.percentile_50(target_table.c.attr_value))\
             .where(
-                ValueTable.serial == outer.c.serial,
-                ValueTable.serial_sub == outer.c.serial_sub,
-                ValueTable.attr_name.in_(args)
+                and_(
+                    target_table.c.serial == main_table.c.serial,
+                    target_table.c.serial_sub == main_table.c.serial_sub,
+                    target_table.c.attr_name.in_(args)
+                )
             )\
-            .correlate(outer)\
+            .correlate(main_table)\
             .scalar_subquery()
 
     def arg_list(self, items):
