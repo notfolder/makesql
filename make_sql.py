@@ -65,8 +65,11 @@ def create_summary_sql(expr_text, source_db_path, parser):
     tree = parser.parse(expr_text)
     transformer = SQLTransformer()
     expr_sql = transformer.transform(tree)
-    print("---- expr Query --")
-    print(str(expr_sql.compile(dialect=sqlite.dialect())))
+    print("\n---- Generated SQL with values ----")
+    print(str(expr_sql.compile(
+        dialect=sqlite.dialect(),
+        compile_kwargs={"literal_binds": True}  # プレースホルダの代わりに実際の値を表示
+    )))
     
     engine = create_engine(f'sqlite:///{source_db_path}')
     create_percentile_functions(source_db_path)
@@ -98,6 +101,12 @@ def create_summary_sql(expr_text, source_db_path, parser):
         .group_by(subquery.c.serial, subquery.c.serial_sub)
     )
     
+    print("\n---- Complete Query with values ----")
+    print(str(query.compile(
+        dialect=sqlite.dialect(),
+        compile_kwargs={"literal_binds": True}  # プレースホルダの代わりに実際の値を表示
+    )))
+    
     return query
 
 def create_summary_pandas(expr_text, source_db_path, output_db_path):
@@ -108,11 +117,12 @@ def create_summary_pandas(expr_text, source_db_path, output_db_path):
     with engine.connect() as conn:
         df = pd.read_sql_table('value_table', conn)
         
-        # データをピボット変換して属性名をカラムに
-        pivoted = df.pivot(
+        # データをピボット変換して属性名をカラムに（pivot_tableを使用）
+        pivoted = df.pivot_table(
             index=['serial', 'serial_sub'],
             columns='attr_name',
-            values='attr_value'
+            values='attr_value',
+            aggfunc='first'  # 重複がある場合は最初の値を使用
         ).reset_index()
         
         # 式の評価関数
@@ -173,79 +183,87 @@ class SQLTransformer(Transformer):
         
     def max(self, tree):
         args = tree[0]  # arg_listから渡された引数のリスト
-        # 相関サブクエリを使用
+        # 外部のテーブルを参照する相関サブクエリを作成
+        outer = ValueTable.__table__.alias()
         return select(ValueTable.attr_value)\
             .where(
-                ValueTable.serial == ValueTable.serial,
-                ValueTable.serial_sub == ValueTable.serial_sub,
+                ValueTable.serial == outer.c.serial,  # 外部テーブルのserialと比較
+                ValueTable.serial_sub == outer.c.serial_sub,  # 外部テーブルのserial_subと比較
                 ValueTable.attr_name.in_(args)
             )\
             .order_by(ValueTable.attr_value.desc())\
             .limit(1)\
+            .correlate(outer)\
             .scalar_subquery()
 
     def min(self, tree):
         args = tree[0]
+        outer = ValueTable.__table__.alias()
         return select(ValueTable.attr_value)\
             .where(
-                ValueTable.serial == ValueTable.serial,
-                ValueTable.serial_sub == ValueTable.serial_sub,
+                ValueTable.serial == outer.c.serial,
+                ValueTable.serial_sub == outer.c.serial_sub,
                 ValueTable.attr_name.in_(args)
             )\
             .order_by(ValueTable.attr_value.asc())\
             .limit(1)\
+            .correlate(outer)\
             .scalar_subquery()
     
     def mean(self, tree):
         args = tree[0]
+        outer = ValueTable.__table__.alias()
         return select(func.avg(ValueTable.attr_value))\
             .where(
-                ValueTable.serial == ValueTable.serial,
-                ValueTable.serial_sub == ValueTable.serial_sub,
+                ValueTable.serial == outer.c.serial,
+                ValueTable.serial_sub == outer.c.serial_sub,
                 ValueTable.attr_name.in_(args)
             )\
+            .correlate(outer)\
             .scalar_subquery()
 
     def median(self, tree):
         args = tree[0]
+        outer = ValueTable.__table__.alias()
         return select(func.percentile_50(ValueTable.attr_value))\
             .where(
-                ValueTable.serial == ValueTable.serial,
-                ValueTable.serial_sub == ValueTable.serial_sub,
+                ValueTable.serial == outer.c.serial,
+                ValueTable.serial_sub == outer.c.serial_sub,
                 ValueTable.attr_name.in_(args)
             )\
+            .correlate(outer)\
             .scalar_subquery()
 
     def arg_list(self, items):
         # 引数リストの各要素を変換して返す
         return [self.transform(item) for item in items]
 
-    def add(self, tree):
-        left = self.transform(tree.children[0])
-        right = self.transform(tree.children[1])
+    def add(self, items):
+        left = items[0]
+        right = items[1]
         return left + right
 
-    def sub(self, tree):
-        left = self.transform(tree.children[0])
-        right = self.transform(tree.children[1])
+    def sub(self, items):
+        left = items[0]
+        right = items[1]
         return left - right
 
-    def mul(self, tree):
-        left = self.transform(tree.children[0])
-        right = self.transform(tree.children[1])
+    def mul(self, items):
+        left = items[0]
+        right = items[1]
         return left * right
 
-    def div(self, tree):
-        left = self.transform(tree.children[0])
-        right = self.transform(tree.children[1])
+    def div(self, items):
+        left = items[0]
+        right = items[1]
         return left / right
 
-    def unary_minus(self, tree):
-        operand = self.transform(tree.children[0])
+    def unary_minus(self, items):
+        operand = items[0]
         return -operand
 
-    def unary_plus(self, tree):
-        operand = self.transform(tree.children[0])
+    def unary_plus(self, items):
+        operand = items[0]
         return operand
 
     def symbol(self, items):
@@ -268,9 +286,6 @@ def main():
     
     # SQLAlchemyによる処理
     query = create_summary_sql(expr, 'dummy_db.sqlite', parser)
-
-    print("---- summary Query --")
-    print(str(query.compile(dialect=sqlite.dialect())))
 
     # SQLAlchemyのセッションを使用してクエリを実行
     engine = create_engine('sqlite:///summary_db.sqlite')
