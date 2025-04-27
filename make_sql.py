@@ -152,28 +152,43 @@ from lark import Transformer  # インポートを追加
 
 class SQLTransformer(Transformer):
     def start(self, items):
-        # startルールは単一の式を含むので、その式の結果を返す
         return items[0]
 
     def max(self, tree):
         args = tree[0]  # arg_listから渡された引数のリスト
-        conditions = [ValueTable.attr_name == arg for arg in args]
-        return func.max(case((or_(*conditions), ValueTable.attr_value)))
+        subquery = (
+            select(ValueTable.attr_value)
+            .where(ValueTable.attr_name.in_(args))
+            .scalar_subquery()
+        )
+        return func.max(subquery)
 
     def min(self, tree):
         args = tree[0]
-        conditions = [ValueTable.attr_name == arg for arg in args]
-        return func.min(case((or_(*conditions), ValueTable.attr_value)))
+        subquery = (
+            select(ValueTable.attr_value)
+            .where(ValueTable.attr_name.in_(args))
+            .scalar_subquery()
+        )
+        return func.min(subquery)
     
     def mean(self, tree):
         args = tree[0]
-        conditions = [ValueTable.attr_name == arg for arg in args]
-        return func.avg(case((or_(*conditions), ValueTable.attr_value)))
+        subquery = (
+            select(ValueTable.attr_value)
+            .where(ValueTable.attr_name.in_(args))
+            .scalar_subquery()
+        )
+        return func.avg(subquery)
 
     def median(self, tree):
         args = tree[0]
-        conditions = [ValueTable.attr_name == arg for arg in args]
-        return func.percentile_50(case((or_(*conditions), ValueTable.attr_value)))
+        subquery = (
+            select(ValueTable.attr_value)
+            .where(ValueTable.attr_name.in_(args))
+            .scalar_subquery()
+        )
+        return func.percentile_50(subquery)
 
     def arg_list(self, items):
         # 引数リストの各要素を変換して返す
