@@ -65,6 +65,8 @@ def create_summary_sql(expr_text, source_db_path, parser):
     tree = parser.parse(expr_text)
     transformer = SQLTransformer()
     expr_sql = transformer.transform(tree)
+    print("---- expr Query --")
+    print(str(expr_sql.compile(dialect=sqlite.dialect())))
     
     engine = create_engine(f'sqlite:///{source_db_path}')
     create_percentile_functions(source_db_path)
@@ -146,78 +148,75 @@ def load_expression():
     with open('expr.txt', 'r') as f:
         return f.read().strip()
 
-class SQLTransformer:
-    def transform(self, tree):
-        if not hasattr(tree, 'data'):
-            return text(str(tree))
+from lark import Transformer  # インポートを追加
 
-        method = getattr(self, f'transform_{tree.data}', self.generic_transform)
-        return method(tree)
+class SQLTransformer(Transformer):
+    def start(self, items):
+        # startルールは単一の式を含むので、その式の結果を返す
+        return items[0]
 
-    def transform_max(self, tree):
-        args = [self.transform(child) for child in tree.children]
+    def max(self, tree):
+        args = tree[0]  # arg_listから渡された引数のリスト
         conditions = [ValueTable.attr_name == arg for arg in args]
         return func.max(case((or_(*conditions), ValueTable.attr_value)))
 
-    def transform_min(self, tree):
-        args = [self.transform(child) for child in tree.children]
+    def min(self, tree):
+        args = tree[0]
         conditions = [ValueTable.attr_name == arg for arg in args]
         return func.min(case((or_(*conditions), ValueTable.attr_value)))
-
-    def transform_mean(self, tree):
-        args = [self.transform(child) for child in tree.children]
+    
+    def mean(self, tree):
+        args = tree[0]
         conditions = [ValueTable.attr_name == arg for arg in args]
         return func.avg(case((or_(*conditions), ValueTable.attr_value)))
 
-    def transform_median(self, tree):
-        args = [self.transform(child) for child in tree.children]
+    def median(self, tree):
+        args = tree[0]
         conditions = [ValueTable.attr_name == arg for arg in args]
         return func.percentile_50(case((or_(*conditions), ValueTable.attr_value)))
 
-    def transform_add(self, tree):
+    def arg_list(self, items):
+        # 引数リストの各要素を変換して返す
+        return [self.transform(item) for item in items]
+
+    def add(self, tree):
         left = self.transform(tree.children[0])
         right = self.transform(tree.children[1])
         return left + right
 
-    def transform_sub(self, tree):
+    def sub(self, tree):
         left = self.transform(tree.children[0])
         right = self.transform(tree.children[1])
         return left - right
 
-    def transform_mul(self, tree):
+    def mul(self, tree):
         left = self.transform(tree.children[0])
         right = self.transform(tree.children[1])
         return left * right
 
-    def transform_div(self, tree):
+    def div(self, tree):
         left = self.transform(tree.children[0])
         right = self.transform(tree.children[1])
         return left / right
 
-    def transform_unary_minus(self, tree):
+    def unary_minus(self, tree):
         operand = self.transform(tree.children[0])
         return -operand
 
-    def transform_unary_plus(self, tree):
+    def unary_plus(self, tree):
         operand = self.transform(tree.children[0])
         return operand
 
-    def transform_symbol(self, tree):
-        # シンボルはそのまま文字列として返す
-        return str(tree.children[0])
+    def symbol(self, items):
+        # itemsは直接リストとして渡される
+        return str(items[0])
 
-    def transform_number(self, tree):
-        # 数値はfloatとして返す
-        return float(tree.children[0])
-
-    def generic_transform(self, tree):
-        if len(tree.children) == 1:
-            return self.transform(tree.children[0])
-        return str(tree.children[0])
+    def number(self, items):
+        # numberメソッドも同様に修正
+        return float(items[0])
 
     def __default__(self, data, children, meta):
         print(f"Unhandled rule: {data}, children: {children}")
-        # 通常は raise して開発中に気づくようにする
         raise NotImplementedError(f"Rule not handled: {data}")
 
 def main():
@@ -229,6 +228,7 @@ def main():
     # SQLAlchemyによる処理
     query = create_summary_sql(expr, 'dummy_db.sqlite', parser)
 
+    print("---- summary Query --")
     print(str(query.compile(dialect=sqlite.dialect())))
 
     # SQLAlchemyのセッションを使用してクエリを実行
