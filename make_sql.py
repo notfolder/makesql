@@ -1,4 +1,5 @@
-from sqlalchemy import create_engine, select, func, text
+from sqlalchemy import create_engine, select, func, text, case, or_
+from sqlalchemy.sql import expression
 from sqlalchemy.orm import Session
 from models import Base, ValueTable, SummaryTable
 from lark import Lark
@@ -57,26 +58,41 @@ class Percentile75(BasePercentile):
         super().__init__()
         self.percentile = 0.75
 
-def create_summary_sql(expr_text, source_db_path):
+def create_summary_sql(expr_text, source_db_path, parser):
     """SQLAlchemyを使用して集計SQLを生成する関数"""
-    engine = create_engine(f'sqlite:///{source_db_path}')
+    # 式をパースしてSQL部分を生成
+    tree = parser.parse(expr_text)
+    transformer = SQLTransformer()
+    expr_sql = transformer.transform(tree)
     
-    # カスタム集計関数を登録
+    engine = create_engine(f'sqlite:///{source_db_path}')
     create_percentile_functions(source_db_path)
     
-    # SQLAlchemyのクエリビルダーを使用
-    query = (
+    # サブクエリとして式の結果を取得
+    subquery = (
         select(
             ValueTable.serial,
             ValueTable.serial_sub,
-            func.max(ValueTable.attr_value).label('max'),
-            func.percentile_75(ValueTable.attr_value).label('q3'),
-            func.percentile_50(ValueTable.attr_value).label('median'),
-            func.percentile_25(ValueTable.attr_value).label('q1'),
-            func.min(ValueTable.attr_value).label('min')
+            expr_sql.label('calculated_value')
         )
         .select_from(ValueTable)
         .group_by(ValueTable.serial, ValueTable.serial_sub)
+        .alias('expr_result')
+    )
+    
+    # メインクエリで統計量を計算
+    query = (
+        select(
+            subquery.c.serial,
+            subquery.c.serial_sub,
+            func.max(subquery.c.calculated_value).label('max'),
+            func.percentile_75(subquery.c.calculated_value).label('q3'),
+            func.percentile_50(subquery.c.calculated_value).label('median'),
+            func.percentile_25(subquery.c.calculated_value).label('q1'),
+            func.min(subquery.c.calculated_value).label('min')
+        )
+        .select_from(subquery)
+        .group_by(subquery.c.serial, subquery.c.serial_sub)
     )
     
     return query
@@ -129,6 +145,43 @@ def load_expression():
     with open('expr.txt', 'r') as f:
         return f.read().strip()
 
+class SQLTransformer:
+    def transform(self, tree):
+        if not hasattr(tree, 'data'):
+            return text(str(tree))
+
+        method = getattr(self, f'transform_{tree.data}', self.generic_transform)
+        return method(tree)
+
+    def transform_max(self, tree):
+        args = [self.transform(child) for child in tree.children]
+        # CASE式を使用して条件分岐を実装
+        conditions = [ValueTable.attr_name == arg for arg in args]
+        return func.max(case((or_(*conditions), ValueTable.attr_value)))
+
+    def transform_min(self, tree):
+        args = [self.transform(child) for child in tree.children]
+        conditions = [ValueTable.attr_name == arg for arg in args]
+        return func.min(case((or_(*conditions), ValueTable.attr_value)))
+
+    def transform_mean(self, tree):
+        args = [self.transform(child) for child in tree.children]
+        conditions = [ValueTable.attr_name == arg for arg in args]
+        return func.avg(case((or_(*conditions), ValueTable.attr_value)))
+
+    def transform_symbol(self, tree):
+        # シンボルはそのまま文字列として返す
+        return str(tree.children[0])
+
+    def transform_number(self, tree):
+        # 数値はfloatとして返す
+        return float(tree.children[0])
+
+    def generic_transform(self, tree):
+        if len(tree.children) == 1:
+            return self.transform(tree.children[0])
+        return str(tree.children[0])
+
 def main():
     """メイン処理"""
     grammar = load_grammar()
@@ -136,7 +189,7 @@ def main():
     parser = Lark(grammar)
     
     # SQLAlchemyによる処理
-    query = create_summary_sql(expr, 'dummy_db.sqlite')
+    query = create_summary_sql(expr, 'dummy_db.sqlite', parser)
     
     # SQLAlchemyのセッションを使用してクエリを実行
     engine = create_engine('sqlite:///summary_db.sqlite')
