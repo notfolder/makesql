@@ -152,43 +152,53 @@ from lark import Transformer  # インポートを追加
 
 class SQLTransformer(Transformer):
     def start(self, items):
+        # startルールは単一の式を含むので、その式の結果を返す
         return items[0]
-
+        
     def max(self, tree):
         args = tree[0]  # arg_listから渡された引数のリスト
-        subquery = (
-            select(ValueTable.attr_value)
-            .where(ValueTable.attr_name.in_(args))
+        # 相関サブクエリを使用
+        return select(ValueTable.attr_value)\
+            .where(
+                ValueTable.serial == ValueTable.serial,
+                ValueTable.serial_sub == ValueTable.serial_sub,
+                ValueTable.attr_name.in_(args)
+            )\
+            .order_by(ValueTable.attr_value.desc())\
+            .limit(1)\
             .scalar_subquery()
-        )
-        return func.max(subquery)
 
     def min(self, tree):
         args = tree[0]
-        subquery = (
-            select(ValueTable.attr_value)
-            .where(ValueTable.attr_name.in_(args))
+        return select(ValueTable.attr_value)\
+            .where(
+                ValueTable.serial == ValueTable.serial,
+                ValueTable.serial_sub == ValueTable.serial_sub,
+                ValueTable.attr_name.in_(args)
+            )\
+            .order_by(ValueTable.attr_value.asc())\
+            .limit(1)\
             .scalar_subquery()
-        )
-        return func.min(subquery)
     
     def mean(self, tree):
         args = tree[0]
-        subquery = (
-            select(ValueTable.attr_value)
-            .where(ValueTable.attr_name.in_(args))
+        return select(func.avg(ValueTable.attr_value))\
+            .where(
+                ValueTable.serial == ValueTable.serial,
+                ValueTable.serial_sub == ValueTable.serial_sub,
+                ValueTable.attr_name.in_(args)
+            )\
             .scalar_subquery()
-        )
-        return func.avg(subquery)
 
     def median(self, tree):
         args = tree[0]
-        subquery = (
-            select(ValueTable.attr_value)
-            .where(ValueTable.attr_name.in_(args))
+        return select(func.percentile_50(ValueTable.attr_value))\
+            .where(
+                ValueTable.serial == ValueTable.serial,
+                ValueTable.serial_sub == ValueTable.serial_sub,
+                ValueTable.attr_name.in_(args)
+            )\
             .scalar_subquery()
-        )
-        return func.percentile_50(subquery)
 
     def arg_list(self, items):
         # 引数リストの各要素を変換して返す
