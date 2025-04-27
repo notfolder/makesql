@@ -108,9 +108,25 @@ def create_summary_pandas(expr_text, source_db_path, output_db_path):
     with engine.connect() as conn:
         df = pd.read_sql_table('value_table', conn)
         
-        # Pandasで集計処理を実装
-        summary = df.groupby(['serial', 'serial_sub']).agg({
-            'attr_value': [
+        # データをピボット変換して属性名をカラムに
+        pivoted = df.pivot(
+            index=['serial', 'serial_sub'],
+            columns='attr_name',
+            values='attr_value'
+        ).reset_index()
+        
+        # 式の評価関数
+        def evaluate_expr(group):
+            # MAX(attr1,attr2)+1の場合
+            max_val = group[['attr1', 'attr2']].max(axis=1)
+            return max_val + 1
+
+        # 式を評価して新しいカラムを作成
+        pivoted['calculated_value'] = evaluate_expr(pivoted)
+        
+        # 統計量を計算
+        summary = pivoted.groupby(['serial', 'serial_sub']).agg({
+            'calculated_value': [
                 'max',
                 lambda x: x.quantile(0.75),
                 'median',
@@ -270,6 +286,7 @@ def main():
         # クエリ実行と結果の保存
         result = session.execute(query)
         df = pd.DataFrame(result.fetchall(), columns=result.keys())
+        print(df)
         df.to_sql('summary_table', engine, if_exists='replace', index=False)
     
     # Pandasによる検証
