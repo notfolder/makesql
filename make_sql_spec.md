@@ -29,6 +29,8 @@ dummy_db.sqlite,serial_subの組み合わせ毎にboxplotに相当するmax,q3,m
 |attr_name|str|属性名|
 |attr_value|float|集計値|
 
+DBが縦持ちなので、計算式のexpr(関数の引数等)についてサブクエリを作成して横持ちにしてmaxやminなどの計算を行う事。
+
 また、上記関数に対してテストするために、pandasでなるべく簡易に作成した同様の計算をしてsummary_db_test.sqliteファイルを作成する関数を作成し、
 summary_db.sqliteの出力とsummary_db_test.sqliteの出力を比較してテストできる様にしたい。
 このテスト関数は汎用的でなくて良いため、expr.txtの内容は固定されている前提で作成して良い。
