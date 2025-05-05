@@ -1,4 +1,4 @@
-db_spec.mdで作成したDBに対して操作するpythonプログラム(make_sql.py)を作りたい。
+DB上の縦持ちの特定の項目(attr)について計算して、serial単位で集計値を別テーブルに格納するプログラム(make_sql)を作りたい。
 
 SQLAlchemyでCDataを使ってdummy_db.sqliteを読み込んで下記の処理をしたい。
 
