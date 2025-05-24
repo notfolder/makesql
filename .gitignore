@@ -1,0 +1,16 @@
+# 出力されたParquetファイルやDBファイルを無視
+parq_output/
+*.db
+*.sqlite
+*.sqlite3
+
+# Pythonキャッシュ
+__pycache__/
+*.pyc
+
+# VSCode設定
+.vscode/
+
+# その他
+.DS_Store
+Thumbs.db
