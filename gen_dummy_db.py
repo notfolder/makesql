@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 def generate_dummy_data():
     n_serials = 25  # serial数
-    n_positions = 1000  # 各serial_subごとの要素数
+    n_positions = 100  # 各serial_subごとの要素数
     n_attrs = 10000     # attr数
 
     output_dir = "parq_output"
