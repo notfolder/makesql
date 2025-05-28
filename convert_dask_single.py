@@ -6,6 +6,11 @@ from tqdm import tqdm
 import io
 import dask.dataframe as dd
 import time
+import threading
+
+# グローバルな処理カウンタ
+pivot_counter = {'count': 0}
+pivot_lock = threading.Lock()
 
 def convert_parquet_to_wide_csv_zip_dask_singlefile(parq_root_dir, output_zip_path, output_csv_name='all_serials.csv'):
     t_start = time.time()
@@ -48,6 +53,9 @@ def convert_parquet_to_wide_csv_zip_dask_singlefile(parq_root_dir, output_zip_pa
             if col not in wide.columns:
                 wide[col] = pd.NA
         wide = wide[['x', 'y'] + attr_names]
+        # カウンタをスレッドセーフにインクリメント
+        with pivot_lock:
+            pivot_counter['count'] += 1
         return wide
 
     t4 = time.time()
@@ -55,10 +63,31 @@ def convert_parquet_to_wide_csv_zip_dask_singlefile(parq_root_dir, output_zip_pa
     wide_ddf = ddf.map_partitions(pivot_partition, meta=meta_df)
     print(f"[TIMER] Daskでpivot処理完了, 経過: {time.time()-t4:.2f}秒")
 
-    import tempfile
+    n_partitions = ddf.npartitions
+    print(f"[INFO] Dask DataFrameのパーティション数: {n_partitions}")
+
     t5 = time.time()
     print("[TIMER] CSV出力(single_file)開始")
-    wide_ddf.to_csv(output_csv_name, index=False, single_file=True)
+    from tqdm import tqdm as _tqdm
+    def to_csv_thread():
+        wide_ddf.to_csv(output_csv_name, index=False, single_file=True)
+    csv_thread = threading.Thread(target=to_csv_thread)
+    csv_thread.start()
+    # メインスレッドで進捗モニター（tqdm表示）
+    import time as _time
+    with _tqdm(total=n_partitions, desc="pivot_partition進捗", unit="part") as pbar:
+        last = 0
+        while csv_thread.is_alive():
+            with pivot_lock:
+                count = pivot_counter['count']
+            pbar.update(count - last)
+            last = count
+            _time.sleep(2)
+        # 最後に残りを加算
+        with pivot_lock:
+            count = pivot_counter['count']
+        pbar.update(count - last)
+    csv_thread.join()
     print(f"[TIMER] CSV出力(single_file)完了, 経過: {time.time()-t5:.2f}秒")
     t6 = time.time()
     print("[TIMER] zip圧縮開始")
