@@ -3,6 +3,9 @@ parq_output/
 *.db
 *.sqlite
 *.sqlite3
+*.csv
+*.parquet
+*.zip
 
 # Pythonキャッシュ
 __pycache__/
