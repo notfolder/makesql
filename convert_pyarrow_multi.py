@@ -94,22 +94,19 @@ def convert_parquet_to_wide_csv_zip_pyarrow_chunked(parq_root_dir, parq_tmp, out
             with io.TextIOWrapper(zf, encoding='utf-8', newline='') as writer:
                 with tqdm(total=len(parquet_files), desc="parquet出力") as pbar_out:
                     for pq_path in parquet_files:
-                        # ParquetFileでrow_groupごとに部分的に読み込み、縦横変換して書き込み
+                        # ParquetFile全体を一括で読み込み、縦横変換して書き込み
                         pf = pq.ParquetFile(pq_path)
-                        num_row_groups = pf.num_row_groups
-                        for rg in range(num_row_groups):
-                            table = pf.read_row_group(rg)
-                            df_chunk = table.to_pandas()
-                            attr_names = sorted(df_chunk['test_name'].drop_duplicates().tolist())
-                            index_cols = [col for col in df_chunk.columns if col not in ['test_name', 'test_value']]
-                            wide = df_chunk.pivot_table(index=index_cols, columns='test_name', values='test_value', aggfunc='first').reset_index()
-                            for col in attr_names:
-                                if col not in wide.columns:
-                                    wide[col] = pd.NA
-                            wide = wide[index_cols + attr_names]
+                        df_chunk = pf.read().to_pandas()
+                        attr_names = sorted(df_chunk['test_name'].drop_duplicates().tolist())
+                        index_cols = [col for col in df_chunk.columns if col not in ['test_name', 'test_value']]
+                        wide = df_chunk.pivot_table(index=index_cols, columns='test_name', values='test_value', aggfunc='first').reset_index()
+                        for col in attr_names:
+                            if col not in wide.columns:
+                                wide[col] = pd.NA
+                        wide = wide[index_cols + attr_names]
 
-                            wide.to_csv(writer, index=False, header=write_header)
-                            write_header = False
+                        wide.to_csv(writer, index=False, header=write_header)
+                        write_header = False
                         pbar_out.update(1)
 
     print(f"完了: {output_zip_path}")
