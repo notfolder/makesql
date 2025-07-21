@@ -61,7 +61,7 @@ def convert_parquet_to_wide_csv_zip_dask(parq_root_dir, output_zip_path, output_
         print("[TIMER] CSV連結・zip圧縮開始")
         csv_files = sorted(glob.glob(os.path.join(tmpdir, 'part_*.csv')))
         with zipfile.ZipFile(output_zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
-            with zipf.open(output_csv_name, 'w') as zf:
+            with zipf.open(output_csv_name, 'w', force_zip64=True) as zf:
                 import io
                 with io.TextIOWrapper(zf, encoding='utf-8', newline='') as writer:
                     for i, fname in enumerate(csv_files):
