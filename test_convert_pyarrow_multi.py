@@ -54,6 +54,7 @@ class TestConvertPyarrowMulti(unittest.TestCase):
         
         # 変換後データファイル（convert_pyarrow_multi.py の出力）
         self.default_output_files = [
+            'test_output.zip',  # テスト用に追加
             'wide_csvs_pyarrow_chunked.zip',
             'wide.zip',
             'output.zip'
@@ -81,35 +82,29 @@ class TestConvertPyarrowMulti(unittest.TestCase):
         if not partition_dirs:
             self.skipTest("Hive形式のパーティションディレクトリが見つかりません。")
         
-        # ランダムにいくつかのパーティションを選択
-        selected_partitions = random.sample(partition_dirs, min(5, len(partition_dirs)))
-        
-        # サンプルデータを収集
-        sample_data = []
-        for partition_dir in selected_partitions:
-            try:
-                dataset = ds.dataset(partition_dir, format='parquet')
-                df = dataset.to_table().to_pandas()
-                
-                # ランダムサンプリング
-                if len(df) > sample_size:
-                    df_sample = df.sample(sample_size)
-                else:
-                    df_sample = df
-                
-                sample_data.append(df_sample)
-                
-            except Exception as e:
-                print(f"パーティション {partition_dir} の読み込みでエラー: {e}")
-                continue
-        
-        if not sample_data:
-            self.skipTest("サンプルデータが取得できませんでした。")
-        
-        # 全サンプルを結合
-        combined_sample = pd.concat(sample_data, ignore_index=True)
-        print(f"原本データからサンプリング完了: {len(combined_sample)}行")
-        return combined_sample
+        try:
+            # Hive形式のパーティション全体を読み込む（パーティションキーも含む）
+            dataset = ds.dataset(self.parq_input_dir, format='parquet', partitioning='hive')
+            full_df = dataset.to_table().to_pandas()
+            
+            # serial, serial_sub列のデータ型を文字列に統一
+            full_df['serial'] = full_df['serial'].astype(str).str.zfill(9)
+            full_df['serial_sub'] = full_df['serial_sub'].astype(str).str.zfill(2)
+            
+            # ランダムサンプリング
+            if len(full_df) > sample_size:
+                sample_df = full_df.sample(sample_size, random_state=42)
+            else:
+                sample_df = full_df
+            
+            print(f"原本データからサンプリング完了: {len(sample_df)}行 (全体: {len(full_df)}行)")
+            print(f"サンプルデータのユニークserial数: {sample_df['serial'].nunique()}")
+            print(f"サンプルデータのユニークserial_sub数: {sample_df['serial_sub'].nunique()}")
+            
+            return sample_df
+            
+        except Exception as e:
+            self.skipTest(f"原本データの読み込みでエラー: {e}")
     
     def load_wide_data(self):
         """変換後データ（ZIP内CSV）を読み込む"""
@@ -122,7 +117,12 @@ class TestConvertPyarrowMulti(unittest.TestCase):
                 self.fail(f"ZIPファイル '{self.output_zip}' 内にwide.csvが含まれていません。利用可能ファイル: {files_in_zip}")
             
             with zipf.open('wide.csv') as csv_file:
-                df = pd.read_csv(csv_file)
+                # serial, serial_subを文字列として読み込むように指定
+                dtypes = {
+                    'serial': str,
+                    'serial_sub': str
+                }
+                df = pd.read_csv(csv_file, dtype=dtypes)
         
         return df
     
