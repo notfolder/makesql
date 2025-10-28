@@ -94,61 +94,6 @@ def create_summary_sql(expr_text, source_db_path, parser):
     
     return query
 
-def create_summary_pandas(expr_text, source_db_path, output_db_path):
-    """Pandasを使用して検証用のサマリーDBを作成する関数"""
-    engine = create_engine(f'sqlite:///{source_db_path}')
-    
-    # engineからconnectionを取得して使用
-    with engine.connect() as conn:
-        df = pd.read_sql_table('value_table', conn)
-        
-        # データをピボット変換して属性名をカラムに（pivot_tableを使用）
-        pivoted = df.pivot_table(
-            index=['serial', 'serial_sub'],
-            columns='attr_name',
-            values='attr_value',
-            aggfunc='first'  # 重複がある場合は最初の値を使用
-        ).reset_index()
-        
-        # 式の評価関数
-        def evaluate_expr(group):
-            # MAX(attr1,attr2)+1の場合
-            max_val = group[['attr1', 'attr2']].max(axis=1)
-            return max_val + 1
-
-        # 式を評価して新しいカラムを作成
-        pivoted['calculated_value'] = evaluate_expr(pivoted)
-        
-        # 統計量を計算
-        summary = pivoted.groupby(['serial', 'serial_sub']).agg({
-            'calculated_value': [
-                'max',
-                lambda x: x.quantile(0.75),
-                'median',
-                lambda x: x.quantile(0.25),
-                'min'
-            ]
-        }).reset_index()
-        
-        # カラム名を設定
-        summary.columns = ['serial', 'serial_sub', 'max', 'q3', 'median', 'q1', 'min']
-        
-        # 結果をSQLiteに保存
-        output_engine = create_engine(f'sqlite:///{output_db_path}')
-        summary.to_sql('summary_table', output_engine, if_exists='replace', index=False)
-
-def compare_results(db1_path, db2_path):
-    """2つのサマリーDBの結果を比較する関数"""
-    engine1 = create_engine(f'sqlite:///{db1_path}')
-    engine2 = create_engine(f'sqlite:///{db2_path}')
-    
-    # engineからconnectionを取得して使用
-    with engine1.connect() as conn1, engine2.connect() as conn2:
-        df1 = pd.read_sql_table('summary_table', conn1)
-        df2 = pd.read_sql_table('summary_table', conn2)
-    
-    return pd.testing.assert_frame_equal(df1, df2)
-
 def load_grammar():
     """testlark.larkファイルから文法定義を読み込む"""
     with open('testlark.lark', 'r') as f:
@@ -351,17 +296,16 @@ class SQLTransformer(Transformer):
         print(f"Unhandled rule: {data}, children: {children}")
         raise NotImplementedError(f"Rule not handled: {data}")
 
-def main():
-    """メイン処理"""
+def make_df_sql(expr, db_path) -> pd.DataFrame:
     grammar = load_grammar()
     expr = load_expression()
     parser = Lark(grammar)
     
     # SQLAlchemyによる処理
-    query = create_summary_sql(expr, 'dummy_db.sqlite', parser)
+    query = create_summary_sql(expr, db_path, parser)
 
     # SQLAlchemyのセッションを使用してクエリを実行
-    engine = create_engine('sqlite:///dummy_db.sqlite')
+    engine = create_engine(f'sqlite:///{db_path}')
     Base.metadata.create_all(engine)
     
     with Session(engine) as session:
@@ -374,8 +318,14 @@ def main():
         # クエリ実行と結果の保存
         result = session.execute(query)
         df = pd.DataFrame(result.fetchall(), columns=result.keys())
-        print(df)
-        df.to_sql('summary_table', engine, if_exists='replace', index=False)
+
+    return df
+
+def main():
+    """メイン処理"""
+    expr = load_expression()
+    df = make_df_sql(expr, 'dummy_db.sqlite')
+    print(df)
     
     # Pandasによる検証
     # create_summary_pandas(expr, 'dummy_db.sqlite', 'summary_db_test.sqlite')
